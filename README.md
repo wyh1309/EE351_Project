@@ -10,6 +10,9 @@ This project demonstrates how to use a GPS module with a Raspberry Pi.
 
 2. **Enable and start the GPS interface** by running:
    ```bash
+   source venv/bin/activate
+   ```
+   ```bash
    sudo ./wheeltec_gps.sh
    ```
    Run the main program:
@@ -17,7 +20,4 @@ This project demonstrates how to use a GPS module with a Raspberry Pi.
    ```bash
    python3 main.py
    ```
-   Install dependencies:
-   ```bash
-   pip3 install pyserial
-   ```
+
