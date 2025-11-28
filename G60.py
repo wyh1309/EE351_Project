@@ -25,76 +25,81 @@ class GPS:
             print("GPS Serial Open Failed!")
 
     @staticmethod
-    def Convert_to_degrees(in_data1, in_data2):
-        len_data1 = len(in_data1)
-        str_data2 = "%05d" % int(in_data2)
-        temp_data = int(in_data1)
-        symbol = 1
-        if temp_data < 0:
-            symbol = -1
-        degree = int(temp_data / 100.0)
-        str_decimal = str(in_data1[len_data1-2]) + str(in_data1[len_data1-1]) + str(str_data2)
-        f_degree = int(str_decimal)/60.0/100000.0
-        # print("f_degree:", f_degree)
-        if symbol > 0:
-            result = degree + f_degree
-        else:
-            result = degree - f_degree
-        return result
+    def Convert_to_degrees(ddmm_mmmm, hemi):
+        """
+        ddmm.mmmm + N/S/E/W -> 十进制度
+        失败返回 None（而不是抛异常）
+        """
+        if not ddmm_mmmm:
+            return None
+        try:
+            v = float(ddmm_mmmm)  # 允许带小数
+        except Exception:
+            return None
+
+        deg = int(v // 100)
+        minutes = v - deg * 100
+        dec = deg + minutes / 60.0
+        if hemi in ('S', 'W', 's', 'w'):
+            dec = -dec
+        return dec
+
 
 
     def GPS_read(self):
-        if self.ser.inWaiting():
-            if self.ser.read(1) == b'G':
-                time.sleep(.05) 
-                if self.ser.inWaiting():
-                    if self.ser.read(1) == b'N':
-                        if self.ser.inWaiting():
-                            choice = self.ser.read(1)
-                            if choice == b'G':
-                                if self.ser.inWaiting():
-                                    if self.ser.read(1) == b'G':
-                                        if self.ser.inWaiting():
-                                            if self.ser.read(1) == b'A':
-                                                #utctime = self.ser.read(7)
-                                                GGA = self.ser.read(70)
-                                                GGA_g = re.findall(r"\w+(?=,)|(?<=,)\w+", str(GGA))
-                                                # print(GGA_g)
-                                                if len(GGA_g) < 13:
-                                                    print("GPS no found")
-                                                    self.gps_t = 0
-                                                    return 0
-                                                else:
-                                                    self.utctime = GGA_g[0]
-                                                    # lat = GGA_g[2][0]+GGA_g[2][1]+'°'+GGA_g[2][2]+GGA_g[2][3]+'.'+GGA_g[3]+'\''
-                                                    self.lat = "%.8f" % self.Convert_to_degrees(str(GGA_g[2]), str(GGA_g[3]))
-                                                    self.ulat = GGA_g[4]
-                                                    # lon = GGA_g[5][0]+GGA_g[5][1]+GGA_g[5][2]+'°'+GGA_g[5][3]+GGA_g[5][4]+'.'+GGA_g[6]+'\''
-                                                    self.lon = "%.8f" % self.Convert_to_degrees(str(GGA_g[5]), str(GGA_g[6]))
-                                                    self.ulon = GGA_g[7]
-                                                    self.numSv = GGA_g[9]
-                                                    self.msl = GGA_g[12]+'.'+GGA_g[13]+GGA_g[14]
-                                                    #print(GGA_g)
-                                                    self.gps_t = 1
-                                                    return 1
-                            elif choice == b'V':
-                                if self.ser.inWaiting():
-                                    if self.ser.read(1) == b'T':
-                                        if self.ser.inWaiting():
-                                            if self.ser.read(1) == b'G':
-                                                if self.gps_t == 1:
-                                                    VTG = self.ser.read(40)
-                                                    VTG_g = re.findall(r"\w+(?=,)|(?<=,)\w+", str(VTG))
-                                                    self.cogt = VTG_g[0]+'.'+VTG_g[1]+'T'
-                                                    if VTG_g[3] == 'M':
-                                                        self.cogm = '0.00'
-                                                        self.sog = VTG_g[4]+'.'+VTG_g[5]
-                                                        self.kph = VTG_g[7]+'.'+VTG_g[8]
-                                                    elif VTG_g[3] != 'M':
-                                                        self.cogm = VTG_g[3]+'.'+VTG_g[4]
-                                                        self.sog = VTG_g[6]+'.'+VTG_g[7]
-                                                        self.kph = VTG_g[9]+'.'+VTG_g[10]
-                                                #print(kph)
+        """
+        逐行读一条 NMEA；只在确认为 GGA / VTG 时解析。
+        解析失败返回 0，不抛异常。
+        """
+        try:
+            line = self.ser.readline().decode('ascii', errors='ignore').strip()
+            if not line:
+                return 0
+
+            # ---------- GGA：时间、经纬度、卫星数、海拔 ----------
+            if line.startswith('$GPGGA') or line.startswith('$GNGGA'):
+                f = line.split(',')
+                # 标准 GGA: 0:$GxGGA,1=UTC,2=lat,3=N/S,4=lon,5=E/W,6=fix,7=sats,8=HDOP,9=alt,10=M,...
+                if len(f) < 11:
+                    return 0
+
+                self.utctime = f[1]
+                lat = self.Convert_to_degrees(f[2], f[3])
+                lon = self.Convert_to_degrees(f[4], f[5])
+                if lat is None or lon is None:
+                    return 0  # 本帧无效
+
+                self.lat  = f"{lat:.8f}"
+                self.ulat = f[3]
+                self.lon  = f"{lon:.8f}"
+                self.ulon = f[5]
+                self.numSv = f[7] or ''
+                # 海拔可能在 f[9]，单位在 f[10]（通常为 M）
+                self.msl = f[9] if len(f) > 9 else ''
+
+                self.gps_t = 1
+                return 1
+
+            # ---------- VTG：地速/地面航向 ----------
+            if line.startswith('$GPVTG') or line.startswith('$GNVTG'):
+                if self.gps_t != 1:
+                    return 0
+                f = line.split(',')
+                # VTG: 0:$..VTG,1=cogt,2=T,3=cogm,4=M,5=sog(kn),6=N,7=sog(kmh),8=K,...
+                # 字段可能为空，做防空处理
+                self.cogt = (f[1] or '0.00') + 'T' if len(f) > 1 else '0.00T'
+                self.cogm = (f[3] or '0.00') if len(f) > 3 else '0.00'
+                self.sog  = (f[5] or '0.00') if len(f) > 5 else '0.00'
+                self.kph  = (f[7] or '0.00') if len(f) > 7 else '0.00'
+                return 0  # 维持原有行为：VTG 不返回 1
+
+            # 其他句子（GSV/GSA/RMC等）忽略
+            return 0
+
+        except Exception:
+            # 任何解析问题都吞掉，返回 0，避免像 'GPGSV' 再次把程序打崩
+            return 0
+
 
     def GPS_show(self):
         print("*********************")
@@ -112,6 +117,3 @@ class GPS:
     def GPS_stop(self):
         self.ser.close()
         print("GPS serial Close!")
-
-    
-
