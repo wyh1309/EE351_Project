@@ -5,7 +5,8 @@ from typing import Optional
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import NavSatFix, NavSatStatus
+from gps_interfaces.msg import GpsSimple
+
 
 PORT = "/dev/ttyUSB0"
 BAUD = 115200
@@ -32,12 +33,33 @@ class GpsSerialNode(Node):
         self.rx_buffer = bytearray()
 
         # 发布 GPS 的话题
-        self.pub_navsat = self.create_publisher(NavSatFix, "gps/fix", 10)
+        self.pub_gps = self.create_publisher(GpsSimple, "gps/simple", 10)
 
         # 定时器：周期性发测试消息给树莓派（可选）
         self.count = 0
         self.last_send = time.time()
         self.timer = self.create_timer(0.005, self.loop_once)
+        
+    def handle_gps_payload(self, payload: str):
+        try:
+            lat_str, lon_str, sats_str = payload.split(',')
+            lat = float(lat_str)
+            lon = float(lon_str)
+            sats = int(sats_str)
+        except Exception as e:
+            self.get_logger().warn(f"Bad GPS payload '{payload}': {e}")
+            return
+
+        # 构造并发布自定义消息
+        msg = GpsSimple()
+        msg.latitude = lat
+        msg.longitude = lon
+        msg.satellites = sats
+
+        self.pub_gps.publish(msg)
+        self.get_logger().info(
+            f"GPS msg published: lat={lat:.8f}, lon={lon:.8f}, sats={sats}"
+        )   
 
     def loop_once(self):
         now = time.time()
@@ -106,39 +128,7 @@ class GpsSerialNode(Node):
                     # 其他类型先简单打印
                     self.get_logger().info(f"Recv from RPi: type={msg_type}, msg={payload}")
 
-    def handle_gps_payload(self, payload: str):
-        """
-        payload 格式： "lat,lon,sats"
-        例如： "30.12345678,120.12345678,10"
-        """
-
-        try:
-            lat_str, lon_str, sats_str = payload.split(',')
-            lat = float(lat_str)
-            lon = float(lon_str)
-            sats = int(sats_str)
-        except Exception as e:
-            self.get_logger().warn(f"Bad GPS payload '{payload}': {e}")
-            return
-
-        # 构造 NavSatFix 消息
-        msg = NavSatFix()
-        # 这里暂时不做坐标系转换，直接当作 WGS84
-        msg.latitude = lat
-        msg.longitude = lon
-        msg.altitude = 0.0  # 如果以后树莓派也发高度，这里可以填真实值
-
-        # status 里没有“卫星数”字段，我先借用 service 塞一下
-        msg.status.status = NavSatStatus.STATUS_FIX
-        msg.status.service = sats  # 纯自用，不是标准用法，但方便你调试
-
-        # 协方差暂时给个 0 或 nan
-        msg.position_covariance_type = NavSatFix.COVARIANCE_TYPE_UNKNOWN
-
-        self.pub_navsat.publish(msg)
-        self.get_logger().info(
-            f"GPS: lat={lat:.8f}, lon={lon:.8f}, sats={sats}"
-        )
+    
 
     def destroy_node(self):
         try:
