@@ -1,4 +1,6 @@
 from setuptools import find_packages, setup
+import os
+from glob import glob
 
 package_name = 'gps_serial_pkg'
 
@@ -10,6 +12,9 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+                # ⭐⭐ 添加 launch 文件安装 ⭐⭐
+        (os.path.join('share', package_name, 'launch'),
+            glob('launch/*.launch.py')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -25,6 +30,7 @@ setup(
     entry_points={
         'console_scripts': [
             'gps_serial_node = gps_serial_pkg.gps_serial_node:main',
+            'gps_receiver_node = gps_serial_pkg.gps_websocket_receiver_node:main', 
         ],
     },
 )

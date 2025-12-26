@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+import os
 import serial
 import time
-from typing import Optional
+import subprocess
 
 import rclpy
 from rclpy.node import Node
@@ -35,11 +36,49 @@ class GpsSerialNode(Node):
         # 发布 GPS 的话题
         self.pub_gps = self.create_publisher(GpsSimple, "gps/simple", 10)
 
-        # 定时器：周期性发测试消息给树莓派（可选）
-        self.count = 0
-        self.last_send = time.time()
+        # 音频文件路径（直接指向工作空间 src 目录）
+        project_root = os.path.expanduser("~/EE351_Project")
+        sound_dir = os.path.join(
+            project_root, "src", "gps_serial_pkg", "gps_serial_pkg", "sounds"
+        )
+
+        self.red_audio = os.path.join(sound_dir, "red_box.wav")
+        self.yellow_audio = os.path.join(sound_dir, "yellow_box.wav")
+
+        self.get_logger().info(f"RED audio path: {self.red_audio}")
+        self.get_logger().info(f"YELLOW audio path: {self.yellow_audio}")
+
+        # 防止一直刷同一个音频：加个冷却时间
+        self.last_red_play = 0.0
+        self.last_yellow_play = 0.0
+        self.play_cooldown = 1.0  # 秒
+
+        # 定时器：轮询串口
         self.timer = self.create_timer(0.005, self.loop_once)
-        
+
+    # ===== 音频播放函数 =====
+    def play_sound(self, path: str, label: str):
+        if not os.path.exists(path):
+            self.get_logger().warn(f"Audio file not found: {path}")
+            return
+
+        try:
+            # 使用 aplay 播放 wav，非阻塞
+            self.get_logger().info(
+                f"Playing {label} audio with aplay: {os.path.basename(path)}"
+            )
+            subprocess.Popen(
+                ["aplay", path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        except FileNotFoundError:
+            self.get_logger().error(
+                "Command 'aplay' not found. Please install it: sudo apt install alsa-utils"
+            )
+        except Exception as e:
+            self.get_logger().error(f"Failed to play {label} audio: {e}")
+
     def handle_gps_payload(self, payload: str):
         try:
             lat_str, lon_str, sats_str = payload.split(',')
@@ -59,76 +98,91 @@ class GpsSerialNode(Node):
         self.pub_gps.publish(msg)
         self.get_logger().info(
             f"GPS msg published: lat={lat:.8f}, lon={lon:.8f}, sats={sats}"
-        )   
+        )
 
-    def loop_once(self):
+    # 新增：处理颜色告警
+    def handle_color_payload(self, payload: str):
+        text = payload.strip().upper()
         now = time.time()
 
-        # ====== 1) 每 2 秒给树莓派发一条测试消息（你原来的逻辑） ======
-        if now - self.last_send >= 2.0:
-            msg = f"HELLO_FROM_PC #{self.count}"
-            pkt = build_packet(0x10, msg.encode())
-            try:
-                self.ser.write(pkt)
-            except Exception as e:
-                self.get_logger().error(f"Serial write error: {e}")
+        if "RED" in text:
+            # 冷却时间内就不重复播
+            if now - self.last_red_play > self.play_cooldown:
+                self.play_sound(self.red_audio, "RED")
+                self.last_red_play = now
             else:
-                self.get_logger().info(f"Sent: {msg}")
-            self.count += 1
-            self.last_send = now
+                self.get_logger().info("RED alert received but in cooldown.")
+        elif "YELLOW" in text:
+            if now - self.last_yellow_play > self.play_cooldown:
+                self.play_sound(self.yellow_audio, "YELLOW")
+                self.last_yellow_play = now
+            else:
+                self.get_logger().info("YELLOW alert received but in cooldown.")
+        else:
+            self.get_logger().info(f"Unknown color payload: '{payload}'")
 
-        # ====== 2) 读取树莓派发来的数据，解析出 GPS 并发布 ======
+    def loop_once(self):
+        # ====== 读取树莓派发来的数据，解析 ======
         try:
             data = self.ser.read(1024)
         except Exception as e:
             self.get_logger().error(f"Serial read error: {e}")
             return
 
-        if data:
-            self.rx_buffer.extend(data)
+        if not data:
+            return
 
-            while True:
-                if len(self.rx_buffer) < 5:
-                    break
+        self.rx_buffer.extend(data)
 
-                pos = self.rx_buffer.find(FRAME_HEADER)
-                if pos == -1:
-                    self.rx_buffer.clear()
-                    break
+        while True:
+            if len(self.rx_buffer) < 5:
+                break
 
-                if pos > 0:
-                    del self.rx_buffer[:pos]
+            pos = self.rx_buffer.find(FRAME_HEADER)
+            if pos == -1:
+                self.rx_buffer.clear()
+                break
 
-                if len(self.rx_buffer) < 5:
-                    break
+            if pos > 0:
+                del self.rx_buffer[:pos]
 
-                length = self.rx_buffer[2]
-                total = 3 + length + 1
+            if len(self.rx_buffer) < 5:
+                break
 
-                if len(self.rx_buffer) < total:
-                    break
+            length = self.rx_buffer[2]
+            total = 3 + length + 1
 
-                frame = bytes(self.rx_buffer[:total])
-                del self.rx_buffer[:total]
+            if len(self.rx_buffer) < total:
+                break
 
-                body = frame[2:-1]
-                checksum = frame[-1]
+            frame = bytes(self.rx_buffer[:total])
+            del self.rx_buffer[:total]
 
-                if (sum(body) & 0xFF) != checksum:
-                    self.get_logger().warn("Checksum error")
-                    continue
+            body = frame[2:-1]
+            checksum = frame[-1]
 
-                msg_type = body[1]
-                payload = body[2:].decode(errors="ignore")
+            if (sum(body) & 0xFF) != checksum:
+                self.get_logger().warn("Checksum error")
+                continue
 
-                # 我们约定：树莓派发 GPS 的帧 msg_type = 0x02
-                if msg_type == 0x02:
-                    self.handle_gps_payload(payload)
-                else:
-                    # 其他类型先简单打印
-                    self.get_logger().info(f"Recv from RPi: type={msg_type}, msg={payload}")
+            msg_type = body[1]
+            self.get_logger().info(f"DEBUG: msg_type raw byte = {msg_type} (hex={msg_type:02X})")
+            payload = body[2:].decode(errors="ignore")
 
-    
+            # 0x02: GPS
+            if msg_type == 0x02:
+                self.handle_gps_payload(payload)
+
+            # 0x03: 颜色告警（RED / YELLOW）
+            elif msg_type == 0x03:
+                self.get_logger().info(f"Recv COLOR alert from RPi: '{payload}'")
+                self.handle_color_payload(payload)
+
+            else:
+                # 其他类型先简单打印
+                self.get_logger().info(
+                    f"Recv from RPi: type={msg_type}, msg='{payload}'"
+                )
 
     def destroy_node(self):
         try:

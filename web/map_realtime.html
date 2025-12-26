@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	<meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+	<style type="text/css">
+	body, html, #allmap {
+		width: 100%;
+		height: 100%;
+		overflow: hidden;
+		margin: 0;
+		font-family: "微软雅黑";
+	}
+	</style>
+	<!-- 替换为你自己的百度地图AK -->
+	<script type="text/javascript" src="https://api.map.baidu.com/api?type=webgl&v=1.0&ak=NbWANMsTxSMQNEbtGOZTGHdrmeTS6MxS"></script>
+	<title>ROS2 实时位置</title>
+</head>
+<body>
+	<div id="allmap"></div>
+</body>
+
+<script type="text/javascript">
+	// ===== 初始化百度地图 =====
+	var map = new BMapGL.Map("allmap");  // 创建地图实例
+	var initPoint = new BMapGL.Point(114.01710062652639 ,22.605442700151002); // 默认
+	map.centerAndZoom(initPoint, 15);
+	map.enableScrollWheelZoom(true);
+
+	// 创建一个 marker 作为机器人位置
+	var marker = new BMapGL.Marker(initPoint);
+	map.addOverlay(marker);
+
+	// ===== 连接 ROS2 WebSocket =====
+	// 确保你的 ROS2 接收节点运行在本机 8888 端口
+	let socket = new WebSocket("ws://localhost:8888");
+
+	socket.onopen = function() {
+		console.log("✅ WebSocket 连接成功！");
+	};
+
+	socket.onmessage = function(event) {
+		try {
+			let data = JSON.parse(event.data);
+			console.log("收到 GPS 数据：", data);
+
+			// 从 ROS2 收到的经纬度是 WGS84，需要转成百度 BD09
+			let bd = wgs84ToBd09(data.lon, data.lat);
+			let newPoint = new BMapGL.Point(bd.lon, bd.lat);
+
+			// 更新 marker 位置
+			marker.setPosition(newPoint);
+			map.panTo(newPoint);
+		} catch (err) {
+			console.error("解析消息出错：", err);
+		}
+	};
+
+	socket.onclose = function() {
+		console.log("❌ WebSocket 已关闭");
+	};
+
+	socket.onerror = function(err) {
+		console.error("WebSocket 错误：", err);
+	};
+
+	// ===== 坐标转换：WGS84 -> GCJ02 -> BD09 =====
+	function wgs84ToGcj02(lon, lat) {
+		const a = 6378245.0;
+		const ee = 0.00669342162296594323;
+		if (outOfChina(lat, lon)) return [lon, lat];
+		let dLat = transformLat(lon - 105.0, lat - 35.0);
+		let dLon = transformLon(lon - 105.0, lat - 35.0);
+		let radLat = lat / 180.0 * Math.PI;
+		let magic = Math.sin(radLat);
+		magic = 1 - ee * magic * magic;
+		let sqrtMagic = Math.sqrt(magic);
+		dLat = (dLat * 180.0) / ((a * (1 - ee)) / (magic * sqrtMagic) * Math.PI);
+		dLon = (dLon * 180.0) / (a / sqrtMagic * Math.cos(radLat) * Math.PI);
+		let mgLat = lat + dLat;
+		let mgLon = lon + dLon;
+		return [mgLon, mgLat];
+	}
+
+	function gcj02ToBd09(lon, lat) {
+		let x = lon, y = lat;
+		let z = Math.sqrt(x * x + y * y) + 0.00002 * Math.sin(y * Math.PI * 3000.0 / 180.0);
+		let theta = Math.atan2(y, x) + 0.000003 * Math.cos(x * Math.PI * 3000.0 / 180.0);
+		let bdLon = z * Math.cos(theta) + 0.0065;
+		let bdLat = z * Math.sin(theta) + 0.006;
+		return [bdLon, bdLat];
+	}
+
+	function wgs84ToBd09(lon, lat) {
+		let [gcjLon, gcjLat] = wgs84ToGcj02(lon, lat);
+		let [bdLon, bdLat] = gcj02ToBd09(gcjLon, gcjLat);
+		return { lon: bdLon, lat: bdLat };
+	}
+
+	function transformLat(x, y) {
+		let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+		ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+		ret += (20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin(y / 3.0 * Math.PI)) * 2.0 / 3.0;
+		ret += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320 * Math.sin(y * Math.PI / 30.0)) * 2.0 / 3.0;
+		return ret;
+	}
+
+	function transformLon(x, y) {
+		let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+		ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+		ret += (20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin(x / 3.0 * Math.PI)) * 2.0 / 3.0;
+		ret += (150.0 * Math.sin(x / 12.0 * Math.PI) + 300.0 * Math.sin(x / 30.0 * Math.PI)) * 2.0 / 3.0;
+		return ret;
+	}
+
+	function outOfChina(lat, lon) {
+		return lon < 72.004 || lon > 137.8347 || lat < 0.8293 || lat > 55.8271;
+	}
+</script>
+</html>
