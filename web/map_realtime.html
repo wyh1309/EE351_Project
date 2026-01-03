@@ -33,7 +33,7 @@
 
 	// ======= 在这里插入红宝箱标注代码 =======
 	var treasurePoint = new BMapGL.Point(114.00260131667896, 22.607488606396778);
-	var treasureLabel = new BMapGL.Label("红宝箱", {
+	var treasureLabel = new BMapGL.Label("red box",{
     	position: treasurePoint,
     	offset: new BMapGL.Size(10, -20)
 	});
@@ -45,7 +45,37 @@
     	padding: "3px",
     	backgroundColor: "rgba(255,255,255,0.8)"
 	});
+
+	var treasurePoint1 = new BMapGL.Point(114.00270131667896, 22.60188606396778);
+	var treasureLabel1 = new BMapGL.Label("yellow box", {
+    	position: treasurePoint1,
+    	offset: new BMapGL.Size(10, -20)
+	});
+	treasureLabel1.setStyle({
+    	color: "yellow",
+    	fontSize: "16px",
+    	fontWeight: "bold",
+    	border: "1px solid yellow",
+    	padding: "3px",
+    	backgroundColor: "rgba(255,255,255,0.8)"
+	});
+
+	var treasurePoint2 = new BMapGL.Point(114.000131667896, 22.60488606396778);
+	var treasureLabel2 = new BMapGL.Label("green box", {
+    	position: treasurePoint2,
+    	offset: new BMapGL.Size(10, -20)
+	});
+	treasureLabel2.setStyle({
+    	color: "green",
+    	fontSize: "16px",
+    	fontWeight: "bold",
+    	border: "1px solid green",
+    	padding: "3px",
+    	backgroundColor: "rgba(255,255,255,0.8)"
+	});
 	map.addOverlay(treasureLabel);
+	map.addOverlay(treasureLabel1);
+	map.addOverlay(treasureLabel2);
 	// ============================================
 
 	// ===== 连接 ROS2 WebSocket =====
