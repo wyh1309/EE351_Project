@@ -23,13 +23,30 @@
 <script type="text/javascript">
 	// ===== 初始化百度地图 =====
 	var map = new BMapGL.Map("allmap");  // 创建地图实例
-	var initPoint = new BMapGL.Point(114.01710062652639 ,22.605442700151002); // 默认
+	var initPoint = new BMapGL.Point(114.00333276300267 ,22.607957854195625); // 默认
 	map.centerAndZoom(initPoint, 15);
 	map.enableScrollWheelZoom(true);
 
 	// 创建一个 marker 作为机器人位置
 	var marker = new BMapGL.Marker(initPoint);
 	map.addOverlay(marker);
+
+	// ======= 在这里插入红宝箱标注代码 =======
+	var treasurePoint = new BMapGL.Point(114.00260131667896, 22.607488606396778);
+	var treasureLabel = new BMapGL.Label("红宝箱", {
+    	position: treasurePoint,
+    	offset: new BMapGL.Size(10, -20)
+	});
+	treasureLabel.setStyle({
+    	color: "red",
+    	fontSize: "16px",
+    	fontWeight: "bold",
+    	border: "1px solid red",
+    	padding: "3px",
+    	backgroundColor: "rgba(255,255,255,0.8)"
+	});
+	map.addOverlay(treasureLabel);
+	// ============================================
 
 	// ===== 连接 ROS2 WebSocket =====
 	// 确保你的 ROS2 接收节点运行在本机 8888 端口

@@ -42,15 +42,19 @@ class GpsSerialNode(Node):
             project_root, "src", "gps_serial_pkg", "gps_serial_pkg", "sounds"
         )
 
-        self.red_audio = os.path.join(sound_dir, "red_box.wav")
-        self.yellow_audio = os.path.join(sound_dir, "yellow_box.wav")
+        self.red_audio = os.path.join(sound_dir, "red-box.wav")
+        self.yellow_audio = os.path.join(sound_dir, "yellow-box.wav")
+        self.green_audio = os.path.join(sound_dir, "green-box.wav")
 
         self.get_logger().info(f"RED audio path: {self.red_audio}")
         self.get_logger().info(f"YELLOW audio path: {self.yellow_audio}")
+        self.get_logger().info(f"GREEN audio path: {self.green_audio}")
+
 
         # 防止一直刷同一个音频：加个冷却时间
         self.last_red_play = 0.0
         self.last_yellow_play = 0.0
+        self.last_green_play = 0.0
         self.play_cooldown = 1.0  # 秒
 
         # 定时器：轮询串口
@@ -118,6 +122,12 @@ class GpsSerialNode(Node):
                 self.last_yellow_play = now
             else:
                 self.get_logger().info("YELLOW alert received but in cooldown.")
+        elif "GREEN" in text:
+            if now - self.last_green_play > self.play_cooldown:
+                self.play_sound(self.green_audio, "GREEN")
+                self.last_green_play = now
+            else:
+                self.get_logger().info("GREEN alert received but in cooldown.")
         else:
             self.get_logger().info(f"Unknown color payload: '{payload}'")
 
